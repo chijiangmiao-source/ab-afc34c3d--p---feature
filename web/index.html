@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <title>放射性废料转运舱 · 联锁网危险下限覆盖审计</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>放射性废料转运舱 · 联锁网审计台</h1>
+    <p class="subtitle">
+      令牌数表示阀位、屏蔽与许可状态。审计引擎构造带祖先比较的
+      <strong>Karp–Miller 覆盖树</strong>，判定危险下限是否<em>可能</em>同时被满足——
+      不以有限回放未触发误判安全。
+    </p>
+  </header>
+
+  <main>
+    <!-- ============ 草稿录入 ============ -->
+    <section class="card" aria-labelledby="draft-title">
+      <h2 id="draft-title">联锁网草稿</h2>
+
+      <div class="dim-row">
+        <label>库所数量
+          <select id="place-count" min="1" max="7"></select>
+        </label>
+        <label>迁移数量
+          <select id="trans-count" min="1" max="10"></select>
+        </label>
+        <span class="hint">库所 ≤ 7，迁移 ≤ 10，迁移标识唯一；消耗 / 产生均为非负整数。</span>
+      </div>
+
+      <h3>库所与初始令牌 / 危险下限</h3>
+      <div class="table-wrap">
+        <table id="place-table">
+          <thead>
+            <tr>
+              <th class="col-idx">#</th>
+              <th>库所名</th>
+              <th>初始令牌</th>
+              <th>危险下限</th>
+            </tr>
+          </thead>
+          <tbody id="place-tbody"></tbody>
+        </table>
+      </div>
+
+      <h3>迁移（消耗 → 产生）</h3>
+      <div class="table-wrap">
+        <table id="trans-table">
+          <thead id="trans-thead"></thead>
+          <tbody id="trans-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="btn-audit" class="primary">开始审计</button>
+        <button type="button" id="btn-load-coverable">载入可覆盖示例</button>
+        <button type="button" id="btn-load-safe">载入不可覆盖示例</button>
+        <button type="button" id="btn-clear" class="danger">清空草稿与证据</button>
+      </div>
+
+      <div id="error-panel" class="error-panel" role="alert" hidden></div>
+    </section>
+
+    <!-- ============ 审计结论与证据 ============ -->
+    <section id="result" class="card" aria-labelledby="result-title" hidden>
+      <h2 id="result-title">审计结论与证据</h2>
+      <div id="verdict-banner"></div>
+      <div id="evidence"></div>
+    </section>
+  </main>
+
+  <footer>
+    纯前端离线交付 · 引擎无回放深度参数，ω 为符号而非大整数 ·
+    <a href="./health.html">健康页</a>
+  </footer>
+
+  <script src="./src/omega.js"></script>
+  <script src="./src/model.js"></script>
+  <script src="./src/engine.js"></script>
+  <script src="./src/examples.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

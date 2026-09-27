@@ -1,0 +1,78 @@
+# 放射性废料转运舱 · 联锁网危险下限覆盖审计
+
+以令牌数表示阀位、屏蔽与许可状态的 Petri 网审计台。引擎构造
+**Karp–Miller 覆盖树**，判定一组危险库所的最低令牌数是否**可能同时被满足**——
+"有限回放未触发"绝不作为安全结论。
+
+## 交付特性
+
+- **纯前端、零依赖、零构建、可离线**：直接用浏览器打开 `web/index.html` 即可使用
+  （不发起任何网络请求，无 CDN / npm 运行时依赖）。
+- 录入规模：库所 **≤ 7**，迁移 **≤ 10**；迁移带唯一标识，逐条声明各库所的
+  消耗 / 产生非负整数；输入令牌足够时迁移才可发生。
+- **合并校验反馈**：重复标识、悬空引用（向量列超出库所数）、全零迁移、
+  非法下限 / 初始值 / 消耗产生量一次全部报出，并立即清除旧结论。
+- **Karp–Miller 覆盖树**（`web/src/engine.js`）：
+  - 祖先比较：命中严格小于的祖先时，将严格增大的分量写入 **ω 符号**；
+  - `ω` 是唯一 `Symbol`，**绝不是普通大整数**，不参与任何算术；
+  - 子节点按迁移标识做**稳定排序**展开（与录入顺序无关）；
+  - 祖先相等 → 重复闭合；非祖先已闭合格点支配 → 支配剪枝（Petri 网单调性保证可靠）；
+    无使能迁移 → 死锁叶子；
+  - **没有回放深度参数**；树完全闭合后才下结论；
+    仅在极端规模触发安全节点预算时给出 `inconclusive`（不可判安全）。
+- 结论展示：
+  - **可覆盖**：覆盖节点、根→覆盖节点的祖先加速链、逐迁移的符号标识 `[t_id]`、
+    全部 ω 写入事件与完整规范树；
+  - **不可覆盖**：已闭合规范树摘要（节点数 / 深度 / 各类叶子数 / ω 节点数）
+    与每片叶子的剪枝或死锁原因。
+
+内置一组可覆盖网（无界装填）与一组不可覆盖网（有界互斥），页面一键载入。
+
+## 目录结构
+
+```
+web/                  纯前端站点（nginx 根目录 / file:// 直接打开）
+  index.html  health.html  styles.css  app.js
+  src/omega.js    ω 符号与扩展序运算
+  src/model.js    合并校验与规范化
+  src/engine.js   Karp–Miller 覆盖树引擎
+  src/examples.js 两组示例网
+test/               node:test 算法测试（含与穷举可达性 BFS 的随机交叉验证）
+scripts/            构建检查、静态服务器、HTTP 冒烟、verify 编排
+deploy/             nginx 配置与两个 Dockerfile
+docker-compose.yml  web + verify
+```
+
+## Docker Compose
+
+```bash
+# 宿主机端口可配置（默认 8080）
+WEB_PORT=9090 docker compose up -d web         # 仅启动站点
+#   http://localhost:9090/          审计台
+#   http://localhost:9090/health.html  健康页
+
+docker compose build verify
+docker compose up --exit-code-from verify verify   # 顺序校验并以退出码报告
+```
+
+`verify` 服务**依次**执行：
+
+1. 算法测试（`node --test`：ω 运算、合并校验、覆盖树判定、支配剪枝、
+   稳定展开、预算截断、随机网与 BFS 交叉验证）；
+2. 前端构建检查（语法编译、本地引用完整性、离线无外链、沙箱端到端管线、
+   静态断言无回放深度参数且 ω 为 Symbol）；
+3. 健康页 HTTP 冒烟（等待 `web` 健康后请求 `/healthz`、`/health.html`、
+   `/index.html`、引擎模块）。
+
+全部通过退出码为 0，任一阶段失败立即非 0 退出。
+
+## 本地开发（无需 Docker）
+
+```bash
+npm test      # 算法测试
+npm run build # 前端构建检查
+PORT=8080 npm run serve
+BASE_URL=http://127.0.0.1:8080 npm run smoke
+```
+
+需要 Node.js ≥ 18（内置 `fetch` 与 `node:test`）。
