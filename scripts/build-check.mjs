@@ -76,22 +76,31 @@ for (const htmlName of ['index.html', 'health.html']) {
 }
 
 // ---------- 3. 沙箱端到端管线 ----------
-const sandbox = { console, Symbol, Number, Array, Set, Map, Math, JSON };
+const sandbox = { console, Symbol, Number, BigInt, Array, Set, Map, Math, JSON };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 vm.createContext(sandbox);
 try {
-  for (const f of ['omega.js', 'model.js', 'engine.js', 'examples.js']) {
+  for (const f of ['omega.js', 'model.js', 'engine.js', 'invariant.js', 'examples.js']) {
     const code = readFileSync(join(webDir, 'src', f), 'utf8');
     vm.runInContext(code, sandbox, { filename: f });
   }
-  assert.ok(sandbox.KMOmega && sandbox.KMModel && sandbox.KMEngine && sandbox.KMExamples, 'UMD 全局挂载失败');
+  assert.ok(
+    sandbox.KMOmega && sandbox.KMModel && sandbox.KMEngine && sandbox.KMInvariant && sandbox.KMExamples,
+    'UMD 全局挂载失败'
+  );
 
   const { validateNet, validateThresholds } = sandbox.KMModel;
   const { buildCoverabilityTree, serializeResult } = sandbox.KMEngine;
-  const { coverableNet, boundedSafeNet } = sandbox.KMExamples;
+  const {
+    buildInvariantCertificate,
+    serializeCertificate,
+    freezeAuditContext,
+    requestCertificate,
+  } = sandbox.KMInvariant;
+  const { coverableNet, boundedSafeNet, nonSeparatingNet } = sandbox.KMExamples;
 
-  for (const ex of [coverableNet, boundedSafeNet]) {
+  for (const ex of [coverableNet, boundedSafeNet, nonSeparatingNet]) {
     const v = validateNet(ex);
     assert.ok(v.ok, () => v.errors.join(';'));
     const th = validateThresholds(ex.thresholds, ex.places.length, ex.places);
@@ -109,7 +118,43 @@ try {
     validateNet(boundedSafeNet).net,
     boundedSafeNet.thresholds
   ).verdict, 'not-coverable');
-  ok('沙箱端到端：两组示例网审计管线通过，结果可 JSON 序列化');
+  assert.equal(buildCoverabilityTree(
+    validateNet(nonSeparatingNet).net,
+    nonSeparatingNet.thresholds
+  ).verdict, 'not-coverable');
+
+  // 位置不变量证书：可分离 / 无此证书 / BigInt 序列化 / 冻结失效
+  const sepCert = buildInvariantCertificate(
+    validateNet(boundedSafeNet).net,
+    boundedSafeNet.thresholds
+  );
+  assert.equal(sepCert.status, 'separating');
+  // 「许可」为关联矩阵零列：极射线 (1,1,0) 与 (0,0,1)，后者系数和最小且严格分离
+  assert.equal(sepCert.certificate.coefficients.join(','), '0,0,1');
+  assert.ok(sepCert.certificate.perTransition.every((p) => p.delta === sandbox.BigInt(0)));
+  assert.equal(sepCert.certificate.initialSum, sandbox.BigInt(0));
+  assert.equal(sepCert.certificate.targetSum, sandbox.BigInt(1));
+  JSON.stringify(serializeCertificate(sepCert));
+
+  const noneCert = buildInvariantCertificate(
+    validateNet(nonSeparatingNet).net,
+    nonSeparatingNet.thresholds
+  );
+  assert.equal(noneCert.status, 'none');
+  assert.equal(noneCert.rays[0].coefficients.join(','), '1,1,1,1');
+  assert.equal(noneCert.rays[0].initialSum, sandbox.BigInt(1));
+  assert.equal(noneCert.rays[0].targetSum, sandbox.BigInt(1), '相等而非严格分离');
+  assert.equal(noneCert.rays[0].separating, false);
+  JSON.stringify(serializeCertificate(noneCert));
+
+  const frozen = freezeAuditContext(validateNet(boundedSafeNet).net, boundedSafeNet.thresholds);
+  const changed = validateNet({ ...boundedSafeNet, initial: [2, 0, 0] });
+  assert.equal(requestCertificate(frozen, changed.net, boundedSafeNet.thresholds).status, 'invalidated');
+  assert.equal(
+    requestCertificate(frozen, validateNet(boundedSafeNet).net, boundedSafeNet.thresholds).status,
+    'separating'
+  );
+  ok('沙箱端到端：三组示例网审计 + 位置不变量证书（分离 / 无此证书 / 失效）管线通过');
 } catch (e) {
   fail(`沙箱端到端失败：${e.stack || e.message}`);
 }
@@ -129,6 +174,36 @@ if (!/Symbol\(['"]ω['"]\)/.test(omegaSrc)) {
   fail('ω 未以 Symbol 形式定义');
 } else {
   ok('ω 以 Symbol 单例定义（非大整数）');
+}
+
+// 位置不变量引擎：必须以 BigInt 精确有理消元，不得用浮点构造极射线
+const invariantSrc = readFileSync(join(webDir, 'src', 'invariant.js'), 'utf8');
+if (!/BigInt/.test(invariantSrc)) {
+  fail('不变量引擎未使用 BigInt 精确运算');
+} else if (/\bparseFloat\b|Math\.(round|floor|ceil)\s*\(/.test(invariantSrc)) {
+  fail('不变量引擎出现浮点近似（parseFloat / Math 取整）');
+} else {
+  ok('不变量极射线以 BigInt 有理消元精确构造（无浮点近似）');
+}
+if (!/enumerateExtremeRays/.test(invariantSrc) || !/rref/.test(invariantSrc)) {
+  fail('不变量引擎缺少极射线枚举 / RREF 消元');
+} else {
+  ok('不变量引擎包含关联矩阵极射线枚举与 RREF 消元');
+}
+const appSrc = readFileSync(join(webDir, 'app.js'), 'utf8');
+for (const marker of ['requestCertificate', 'freezeAuditContext', 'invariant-panel', 'btn-request-invariant']) {
+  if (!appSrc.includes(marker)) fail(`app.js 缺少不变量证书接线：${marker}`);
+}
+if (!appSrc.includes('invalidated')) {
+  fail('app.js 未处理旧证书失效状态');
+} else {
+  ok('前端接线：冻结请求、失效处理、证书面板齐备');
+}
+const indexSrc = readFileSync(join(webDir, 'index.html'), 'utf8');
+if (!indexSrc.includes('./src/invariant.js') || !indexSrc.includes('btn-load-nonsep')) {
+  fail('index.html 未引用 invariant.js 或缺少无不变量示例入口');
+} else {
+  ok('index.html 引用 invariant.js 并提供无不变量不可覆盖示例');
 }
 
 console.log(failures === 0 ? '\n构建检查全部通过。' : `\n构建检查失败 ${failures} 项。`);

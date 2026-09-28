@@ -60,8 +60,23 @@ await check('存活探针 /healthz', '/healthz', (res, body) => {
 
 await check('主页 /index.html', '/index.html', (res, body) => {
   if (res.status !== 200) return `状态码 ${res.status}，期望 200`;
-  for (const marker of ['Karp', '开始审计', '清空草稿与证据', './src/engine.js']) {
+  for (const marker of [
+    'Karp',
+    '开始审计',
+    '清空草稿与证据',
+    './src/engine.js',
+    './src/invariant.js',
+    '载入无不变量不可覆盖示例',
+  ]) {
     if (!body.includes(marker)) return `主页缺少标记：${marker}`;
+  }
+  return null;
+});
+
+await check('前端逻辑 /app.js', '/app.js', (res, body) => {
+  if (res.status !== 200) return `状态码 ${res.status}`;
+  for (const marker of ['请求位置不变量证书', 'requestCertificate', '旧证书已失效']) {
+    if (!body.includes(marker)) return `前端逻辑缺少标记：${marker}`;
   }
   return null;
 });
@@ -69,6 +84,14 @@ await check('主页 /index.html', '/index.html', (res, body) => {
 await check('前端模块 /src/engine.js', '/src/engine.js', (res, body) => {
   if (res.status !== 200) return `状态码 ${res.status}`;
   if (!body.includes('buildCoverabilityTree')) return '引擎内容异常';
+  return null;
+});
+
+await check('不变量模块 /src/invariant.js', '/src/invariant.js', (res, body) => {
+  if (res.status !== 200) return `状态码 ${res.status}`;
+  for (const marker of ['buildInvariantCertificate', 'enumerateExtremeRays', 'freezeAuditContext']) {
+    if (!body.includes(marker)) return `不变量模块缺少标记：${marker}`;
+  }
   return null;
 });
 

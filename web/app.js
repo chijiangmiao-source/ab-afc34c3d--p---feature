@@ -13,7 +13,13 @@
 (function () {
   const { validateNet, validateThresholds } = window.KMModel;
   const { buildCoverabilityTree, serializeResult } = window.KMEngine;
-  const { coverableNet, boundedSafeNet } = window.KMExamples;
+  const {
+    buildInvariantCertificate,
+    serializeCertificate,
+    freezeAuditContext,
+    requestCertificate,
+  } = window.KMInvariant;
+  const { coverableNet, boundedSafeNet, nonSeparatingNet } = window.KMExamples;
 
   const MAX_PLACES = 7;
   const MAX_TRANS = 10;
@@ -28,15 +34,21 @@
     btnClear: document.getElementById('btn-clear'),
     btnLoadCoverable: document.getElementById('btn-load-coverable'),
     btnLoadSafe: document.getElementById('btn-load-safe'),
+    btnLoadNonSep: document.getElementById('btn-load-nonsep'),
     errorPanel: document.getElementById('error-panel'),
     result: document.getElementById('result'),
     verdictBanner: document.getElementById('verdict-banner'),
     evidence: document.getElementById('evidence'),
+    invariantPanel: document.getElementById('invariant-panel'),
   };
 
   let placeCount = 3;
   let transCount = 2;
   let inputListenersBound = false;
+  // 当前展示结论所对应的规范化输入；证书请求据此冻结。
+  // 任何编辑 / 载入示例 / 清空都会经 clearConclusion 立即作废。
+  let lastAudit = null; // { net, thresholds }
+  let frozen = null; // freezeAuditContext 的冻结快照
 
   // ---------- 录入矩阵 ----------
 
@@ -228,6 +240,11 @@
     }
 
     const result = buildCoverabilityTree(netResult.net, thresholds);
+    lastAudit = { net: netResult.net, thresholds };
+    // 不可覆盖结论旁冻结本次规范化输入；证书请求只能附着在这份冻结上
+    frozen = result.verdict === 'not-coverable'
+      ? freezeAuditContext(netResult.net, thresholds)
+      : null;
     const serialized = serializeResult(result);
     renderResult(serialized);
   }
@@ -286,6 +303,7 @@
     els.result.hidden = false;
     els.verdictBanner.innerHTML = '';
     els.evidence.innerHTML = '';
+    els.invariantPanel.innerHTML = '';
 
     const targetText = fmtVec(r.target, null);
     if (r.verdict === 'coverable') {
@@ -305,6 +323,7 @@
           `该判定基于完整的 Karp–Miller 覆盖树（祖先重复闭合 + 支配剪枝 + 死锁叶子），而非有限回放。`
       );
       els.verdictBanner.appendChild(banner);
+      renderInvariantRequest();
       renderClosedTreeSummary(r);
     } else {
       const banner = div(
@@ -392,6 +411,160 @@
     renderTreeDetails(r, false);
   }
 
+  // ---------- 位置不变量证书 ----------
+
+  function renderInvariantRequest() {
+    const block = document.createElement('div');
+    block.className = 'evidence-block invariant-request';
+    const f = frozen;
+    const frozenRows = f
+      ? f.transitions
+          .map(
+            (t) =>
+              `<li><span class="tid">[${escapeHtml(t.id)}]</span> ` +
+              `消耗 ${fmtVec(t.consume, null)} → 产生 ${fmtVec(t.produce, null)}</li>`
+          )
+          .join('')
+      : '';
+    block.innerHTML =
+      '<h3>位置不变量证书（独立于覆盖树闭合的线性解释）</h3>' +
+      '<p class="leaf-reason">覆盖树闭合是「不可覆盖」的一种解释；也可以独立请求一份' +
+      '<strong>非负 P-不变量证书</strong>，从关联矩阵直接说明危险下限为何不可能同时达到。' +
+      '请求会冻结本次规范化的库所顺序、初始标识、迁移向量与危险下限；' +
+      '之后编辑任一草稿字段、载入示例或清空，旧证书立即失效且不会附着到新结论。</p>' +
+      (f
+        ? '<div class="frozen-box"><div class="frozen-head">已冻结输入' +
+          `<span class="chip">指纹 ${escapeHtml(f.fingerprint)}</span></div>` +
+          `<div class="frozen-grid"><span>库所顺序：${f.places
+            .map((p, j) => `${escapeHtml(p)}#${j + 1}`)
+            .join('，')}</span>` +
+          `<span>初始标识 M₀：${fmtVec(f.initial, null)}</span>` +
+          `<span>危险下限 b：${fmtVec(f.target, null)}</span></div>` +
+          `<ul class="frozen-trans">${frozenRows}</ul></div>`
+        : '');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'primary';
+    btn.id = 'btn-request-invariant';
+    btn.textContent = '请求位置不变量证书';
+    btn.addEventListener('click', onRequestCertificate);
+    block.appendChild(btn);
+    els.invariantPanel.appendChild(block);
+  }
+
+  function onRequestCertificate() {
+    if (!lastAudit || !frozen) return;
+    const cert = requestCertificate(frozen, lastAudit.net, lastAudit.thresholds);
+    const serialized = serializeCertificate(cert);
+    renderCertificate(serialized);
+  }
+
+  function renderCertificate(c) {
+    // 重入请求：移除上一份证书，但保留请求入口与冻结框
+    els.invariantPanel
+      .querySelectorAll('.certificate-outcome')
+      .forEach((n) => n.remove());
+
+    const block = document.createElement('div');
+    block.className = 'evidence-block certificate-outcome';
+
+    if (c.status === 'invalidated') {
+      block.innerHTML =
+        '<div class="cert-invalid"><strong>旧证书已失效。</strong>' +
+        escapeHtml(c.reason || '冻结上下文已变更。') +
+        '请基于当前草稿重新审计后再请求。</div>';
+      els.invariantPanel.appendChild(block);
+      return;
+    }
+
+    if (c.status === 'none') {
+      block.innerHTML =
+        '<h3>位置不变量证书：该线性解释不可构造</h3>' +
+        '<div class="cert-none">' +
+        '<strong>非负 P-不变量锥的全部极射线中，不存在满足 y·M₀ &lt; y·b 的严格分离射线。</strong><br>' +
+        `关联矩阵秩 = ${c.rank}，零空间维数 = ${c.nullity}；共枚举到 ${c.rays.length} 条非负极射线，` +
+        '逐条比较 y·M₀ 与 y·b 均不成立严格不等式。</div>' +
+        '<p class="cert-verdict-stands">这只表示<strong>这一种线性证书解释</strong>无法构造；' +
+        '上方 Karp–Miller 覆盖树给出的「危险下限不可覆盖」结论' +
+        '<strong>维持不变，不被改写、不降级、不附加本证书</strong>。</p>';
+      block.innerHTML += raysDetails(c);
+      els.invariantPanel.appendChild(block);
+      return;
+    }
+
+    // status === 'separating'
+    const cert = c.certificate;
+    const coeffText = c.places
+      .map((p, i) => `${escapeHtml(p)}·${cert.coefficients[i]}`)
+      .join(' + ');
+    const transRows = cert.perTransition
+      .map(
+        (p) =>
+          `<tr${p.balanced ? '' : ' class="cert-bad-row"'}>` +
+          `<td style="text-align:left"><span class="tid">[${escapeHtml(p.transition)}]</span></td>` +
+          `<td>${p.weightedConsume}</td><td>${p.weightedProduce}</td>` +
+          `<td>${p.delta}${p.balanced ? ' ✓' : ' ✗'}</td></tr>`
+      )
+      .join('');
+    block.innerHTML =
+      '<h3>位置不变量证书：严格分离的非负 P-不变量</h3>' +
+      '<div class="cert-sep">' +
+      '<strong>独立结论：</strong>以下非负权值向量对每条迁移保持加权令牌数不变，' +
+      '而危险下限的加权和严格大于初始加权和——任何可达标记都不可能逐分量达到危险下限。</div>' +
+      `<div class="cert-coeff">权值向量 y = (${coeffText})` +
+      `<span class="chip">本原（gcd = 1）</span>` +
+      `<span class="chip">系数和 ${cert.coefficientSum}</span>` +
+      `<span class="chip">关联矩阵秩 ${c.rank} / 零空间维数 ${c.nullity}</span></div>` +
+      '<h3 style="margin-top:12px">逐迁移复算：加权产生 − 加权消耗必须为 0</h3>' +
+      '<div class="table-wrap"><table><thead><tr>' +
+      '<th style="text-align:left">迁移</th><th>Σ 权·消耗</th><th>Σ 权·产生</th><th>加权增减 Δ</th>' +
+      '</tr></thead><tbody>' +
+      transRows +
+      '</tbody></table></div>' +
+      '<div class="cert-sums">' +
+      `<div>初始加权和　y·M₀ = <strong>${cert.initialSum}</strong></div>` +
+      `<div>危险加权和　y·b　 = <strong>${cert.targetSum}</strong></div>` +
+      `<div class="cert-strict">严格不等式：${cert.initialSum} &lt; ${cert.targetSum}` +
+      '（守恒量恒为初始值，下限要求其变大 → 危险下限不可能同时达到）</div></div>' +
+      '<p class="cert-standalone">本证书仅依据关联矩阵与冻结输入得出，' +
+      '与覆盖树是否闭合互为独立证据；选取规则：严格分离极射线中系数和最小，' +
+      '平局按库所顺序字典序最小。</p>';
+    block.innerHTML += raysDetails(c);
+    els.invariantPanel.appendChild(block);
+  }
+
+  function raysDetails(c) {
+    if (!c.rays.length) {
+      return '<details class="rays-details"><summary>非负 P-不变量极射线（0 条）</summary>' +
+        '<p class="leaf-reason">无非负 P-不变量（锥仅含零向量）。</p></details>';
+    }
+    const head =
+      '<tr><th>#</th>' +
+      c.places.map((p) => `<th>${escapeHtml(p)}</th>`).join('') +
+      '<th>系数和</th><th>y·M₀</th><th>y·b</th><th>严格分离</th></tr>';
+    const rows = c.rays
+      .map((r, i) => {
+        const chosen = c.status === 'separating' && c.certificate && i === c.certificate.rayIndex;
+        return (
+          `<tr${chosen ? ' class="cert-chosen-row"' : ''}>` +
+          `<td>${i + 1}${chosen ? ' ★' : ''}</td>` +
+          r.coefficients.map((x) => `<td>${x}</td>`).join('') +
+          `<td>${r.coefficientSum}</td><td>${r.initialSum}</td><td>${r.targetSum}</td>` +
+          `<td>${r.separating ? '是' : '否'}</td></tr>`
+        );
+      })
+      .join('');
+    return (
+      '<details class="rays-details" open><summary>非负 P-不变量锥的全部极射线' +
+      `（${c.rays.length} 条，BigInt 有理消元精确枚举；★ 为选中证书）</summary>` +
+      '<div class="table-wrap" style="margin-top:8px"><table><thead>' +
+      head +
+      '</thead><tbody>' +
+      rows +
+      '</tbody></table></div></details>'
+    );
+  }
+
   function treeChips(r) {
     const s = r.tree.stats;
     return (
@@ -459,10 +632,15 @@
   // ---------- 清空 / 示例 ----------
 
   function clearConclusion() {
+    // 编辑任一草稿字段、切换库所/迁移数、载入示例、清空或重新审计：
+    // 旧结论与旧位置不变量证书立即失效，不得附着到新结论。
+    lastAudit = null;
+    frozen = null;
     els.result.hidden = true;
     els.result.removeAttribute('aria-hidden');
     els.verdictBanner.innerHTML = '';
     els.evidence.innerHTML = '';
+    els.invariantPanel.innerHTML = '';
     els.errorPanel.hidden = true;
     els.errorPanel.innerHTML = '';
     clearFieldMarks();
@@ -588,4 +766,5 @@
   els.btnClear.addEventListener('click', clearAll);
   els.btnLoadCoverable.addEventListener('click', () => loadExample(coverableNet));
   els.btnLoadSafe.addEventListener('click', () => loadExample(boundedSafeNet));
+  els.btnLoadNonSep.addEventListener('click', () => loadExample(nonSeparatingNet));
 })();

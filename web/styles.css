@@ -253,6 +253,85 @@ button.danger:hover { background: var(--danger-bg); }
 
 tr.witness-row td { background: var(--witness); }
 
+/* ============ 位置不变量证书 ============ */
+.invariant-request .frozen-box {
+  border: 1px dashed var(--primary);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0 12px;
+  background: color-mix(in srgb, var(--primary) 5%, var(--surface));
+  font-size: 13px;
+}
+.frozen-head {
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.frozen-grid { display: flex; flex-direction: column; gap: 3px; }
+.frozen-trans {
+  margin: 6px 0 0;
+  padding-left: 0;
+  list-style: none;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.cert-sep, .cert-none {
+  border: 1px solid var(--safe);
+  background: var(--safe-bg);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  font-size: 13.5px;
+}
+.cert-invalid {
+  border: 1px solid var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 8px 0;
+  font-size: 13.5px;
+}
+.cert-verdict-stands {
+  border-left: 4px solid var(--safe);
+  padding-left: 10px;
+  margin: 10px 0;
+  font-size: 13.5px;
+}
+.cert-coeff {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 14px;
+  margin: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cert-sums {
+  margin-top: 12px;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cert-strict {
+  color: var(--safe);
+  font-weight: 700;
+}
+.cert-standalone {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.cert-bad-row td { background: var(--danger-bg); }
+.cert-chosen-row td { background: var(--witness); }
+.rays-details { margin-top: 12px; }
+
 details { margin-top: 10px; }
 summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
 

@@ -59,6 +59,7 @@
         <button type="button" id="btn-audit" class="primary">开始审计</button>
         <button type="button" id="btn-load-coverable">载入可覆盖示例</button>
         <button type="button" id="btn-load-safe">载入不可覆盖示例</button>
+        <button type="button" id="btn-load-nonsep">载入无不变量不可覆盖示例</button>
         <button type="button" id="btn-clear" class="danger">清空草稿与证据</button>
       </div>
 
@@ -69,6 +70,7 @@
     <section id="result" class="card" aria-labelledby="result-title" hidden>
       <h2 id="result-title">审计结论与证据</h2>
       <div id="verdict-banner"></div>
+      <div id="invariant-panel"></div>
       <div id="evidence"></div>
     </section>
   </main>
@@ -81,6 +83,7 @@
   <script src="./src/omega.js"></script>
   <script src="./src/model.js"></script>
   <script src="./src/engine.js"></script>
+  <script src="./src/invariant.js"></script>
   <script src="./src/examples.js"></script>
   <script src="./app.js"></script>
 </body>
