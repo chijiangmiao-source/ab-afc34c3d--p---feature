@@ -13,7 +13,9 @@
 (function () {
   const { validateNet, validateThresholds } = window.KMModel;
   const { buildCoverabilityTree, serializeResult } = window.KMEngine;
-  const { coverableNet, boundedSafeNet } = window.KMExamples;
+  const { requestCertificate, serializeCertificate, freezeSnapshot, snapshotMatches } =
+    window.KMInvariant;
+  const { coverableNet, boundedSafeNet, drainingSafeNet } = window.KMExamples;
 
   const MAX_PLACES = 7;
   const MAX_TRANS = 10;
@@ -28,6 +30,7 @@
     btnClear: document.getElementById('btn-clear'),
     btnLoadCoverable: document.getElementById('btn-load-coverable'),
     btnLoadSafe: document.getElementById('btn-load-safe'),
+    btnLoadDraining: document.getElementById('btn-load-draining'),
     errorPanel: document.getElementById('error-panel'),
     result: document.getElementById('result'),
     verdictBanner: document.getElementById('verdict-banner'),
@@ -37,6 +40,11 @@
   let placeCount = 3;
   let transCount = 2;
   let inputListenersBound = false;
+
+  // 最近一次成功审计冻结下来的规范化输入。任何草稿变更都会清空它，
+  // 旧位置不变量证书随之失效，绝不允许附着到新结论。
+  // 结构：{ net, target, snapshot }
+  let lastAudit = null;
 
   // ---------- 录入矩阵 ----------
 
@@ -185,7 +193,7 @@
   // ---------- 审计 ----------
 
   function onAudit() {
-    clearConclusion(); // 立即移除旧结论与旧错误
+    clearConclusion(); // 立即移除旧结论与旧错误（并冻结失效旧证书）
     clearFieldMarks();
 
     const draft = collectDraft();
@@ -227,7 +235,13 @@
       return;
     }
 
-    const result = buildCoverabilityTree(netResult.net, thresholds);
+    // 冻结本次规范化的库所顺序、初始标识、迁移向量与危险下限：
+    // 位置不变量证书只能针对这份冻结快照；之后任何草稿变更都会使其失效。
+    const net = netResult.net;
+    const snapshot = freezeSnapshot(net, thresholds);
+    lastAudit = { net, target: thresholds, snapshot };
+
+    const result = buildCoverabilityTree(net, thresholds);
     const serialized = serializeResult(result);
     renderResult(serialized);
   }
@@ -302,10 +316,12 @@
       const banner = div(
         'verdict not-coverable',
         `<span class="big">✅ 危险下限不可覆盖：规范树全部闭合，无任何节点覆盖 ${targetText}。</span>` +
-          `该判定基于完整的 Karp–Miller 覆盖树（祖先重复闭合 + 支配剪枝 + 死锁叶子），而非有限回放。`
+          `该判定基于完整的 Karp–Miller 覆盖树（祖先重复闭合 + 支配剪枝 + 死锁叶子），而非有限回放。` +
+          `若需要不依赖覆盖树闭合的独立解释，可在结论旁请求位置不变量（P-不变量）证书。`
       );
       els.verdictBanner.appendChild(banner);
       renderClosedTreeSummary(r);
+      renderInvariantRequest(r);
     } else {
       const banner = div(
         'verdict inconclusive',
@@ -378,6 +394,141 @@
 
     // 3) 覆盖树（默认折叠）
     renderTreeDetails(r, true);
+  }
+
+  // ---------- 位置不变量证书（独立于覆盖树闭合的解释） ----------
+
+  function renderInvariantRequest(r) {
+    const block = document.createElement('div');
+    block.className = 'evidence-block invariant-block';
+    block.innerHTML =
+      '<h3>位置不变量证书（独立解释，可选）</h3>' +
+      '<p class="leaf-reason">不把覆盖树闭合当作唯一解释：请求引擎从迁移关联矩阵精确构造' +
+      '非负 P-不变量锥的极射线（BigInt 有理消元），寻找使初始加权和严格小于危险加权和的' +
+      '本原整数不变量。证书只能针对本次审计冻结的规范化快照；随后编辑任一草稿字段、' +
+      '载入示例或清空都会使其立即失效。</p>';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'btn-request-invariant';
+    btn.textContent = '请求位置不变量证书';
+    btn.addEventListener('click', () => onRequestInvariant(r));
+    block.appendChild(btn);
+    const panel = document.createElement('div');
+    panel.id = 'invariant-panel';
+    panel.style.marginTop = '12px';
+    block.appendChild(panel);
+    els.evidence.appendChild(block);
+  }
+
+  function onRequestInvariant(r) {
+    const panel = document.getElementById('invariant-panel');
+    if (!panel) return;
+
+    // 冻结守卫：结论必须仍挂在原快照上，任何中途变更都应已经清空结论；
+    // 此处再独立核验一次，防止旧证书附着到新结论。
+    if (!lastAudit || !snapshotMatches(lastAudit.snapshot, lastAudit.net, lastAudit.target)) {
+      panel.innerHTML =
+        '<div class="invariant-stale">本次审计的冻结快照已失效（草稿被编辑、示例被载入或已清空）。' +
+        '旧证书不得附着到新结论，请重新审计后再请求。</div>';
+      return;
+    }
+    // 结论渲染快照与冻结快照还必须逐字节一致（库所顺序 / 初始 / 迁移 / 下限）。
+    if (r.places.join('|') !== lastAudit.snapshot.places.join('|') ||
+        JSON.stringify(r.target) !== JSON.stringify(lastAudit.snapshot.target)) {
+      panel.innerHTML = '<div class="invariant-stale">结论与冻结快照不一致，证书请求被拒绝。</div>';
+      return;
+    }
+
+    const cert = requestCertificate(lastAudit.net, lastAudit.target);
+    const ser = serializeCertificate(cert);
+    if (cert.status === 'certificate') {
+      renderInvariantCertificate(panel, ser);
+    } else {
+      renderInvariantUnavailable(panel, ser);
+    }
+  }
+
+  function renderInvariantCertificate(panel, c) {
+    const cert = c.certificate;
+    const places = c.snapshot.places;
+
+    // 不变量线性式：y1·P1 + y2·P2 + …
+    const terms = cert.vector
+      .map((y, i) => `${y}·${escapeHtml(places[i] || 'P' + (i + 1))}`)
+      .join(' + ');
+
+    const checks = cert.transitionChecks
+      .map((k) => {
+        const ok = k.delta === '0';
+        const signed = k.delta === '0' ? '0' : (k.delta.startsWith('-') ? k.delta : '+' + k.delta);
+        return (
+          `<tr class="${ok ? 'inv-ok' : 'inv-bad'}">` +
+          `<td><span class="tid">[${escapeHtml(k.transition)}]</span></td>` +
+          `<td>${k.weightedConsume}</td><td>${k.weightedProduce}</td>` +
+          `<td><strong>${signed}</strong></td>` +
+          `<td>${ok ? '✔ 守恒（加权增减为 0）' : '✘ 不平衡'}</td></tr>`
+        );
+      })
+      .join('');
+
+    const rays = c.rays
+      .map((ray, i) => {
+        const sup = ray.support
+          .map((j) => escapeHtml(places[j] || 'P' + (j + 1)))
+          .join('、') || '（零向量，不应出现）';
+        const cls = ray.separating ? 'ray-separating' : 'ray-neutral';
+        const tag = ray.separating ? '<span class="ray-tag sep">严格分离</span>' : '<span class="ray-tag eq">等式不分离</span>';
+        const chosen = ray.vector.join(',') === cert.vector.join(',');
+        return (
+          `<tr class="${cls}${chosen ? ' ray-chosen' : ''}">` +
+          `<td>${i + 1}${chosen ? ' ★' : ''}</td>` +
+          `<td>(${ray.vector.join(', ')})</td>` +
+          `<td>${ray.coefficientSum}</td>` +
+          `<td>${sup}</td>` +
+          `<td>${ray.initialWeighted}</td><td>${ray.targetWeighted}</td>` +
+          `<td>${tag}</td></tr>`
+        );
+      })
+      .join('');
+
+    panel.innerHTML =
+      '<div class="invariant-ok">' +
+      '<strong>✔ 位置不变量证书已构造（独立于覆盖树闭合的不可覆盖解释）。</strong>' +
+      '</div>' +
+      `<p class="inv-formula">不变量 y = (${cert.vector.join(', ')})，加权令牌和：<strong>${terms}</strong></p>` +
+      '<div class="table-wrap"><table class="inv-table"><thead><tr>' +
+      '<th>迁移</th><th>加权消耗 y·⁻t</th><th>加权产生 y·t⁺</th><th>加权增量 y·(t⁺−⁻t)</th><th>逐迁移复算</th>' +
+      '</tr></thead><tbody>' + checks + '</tbody></table></div>' +
+      '<p class="inv-formula">初始加权和 <strong>y·M0 = ' + cert.initialWeighted + '</strong>' +
+      '　&lt;　危险加权和 <strong>y·T = ' + cert.targetWeighted + '</strong>' +
+      '（严格不等式，差 ' + (BigInt(cert.targetWeighted) - BigInt(cert.initialWeighted)).toString() + '）</p>' +
+      '<p class="leaf-reason">任何可达标记 M 都满足 y·M = y·M0（每行加权增量复算为 0）；' +
+      '若 M 逐分量达到危险下限 T，则 y·M ≥ y·T &gt; y·M0，矛盾。' +
+      '因此危险下限不可能同时达到——此结论不依赖覆盖树如何闭合。</p>' +
+      '<details><summary>非负 P-不变量锥的全部极射线（共 ' + c.rayCount +
+      ' 条；★ 为按稳定规则选中的本原证书）</summary>' +
+      '<div class="table-wrap" style="margin-top:8px"><table class="inv-table"><thead><tr>' +
+      '<th>#</th><th>本原向量（按库所顺序）</th><th>系数和</th><th>非零库所</th>' +
+      '<th>y·M0</th><th>y·T</th><th>分离性</th>' +
+      '</tr></thead><tbody>' + rays + '</tbody></table></div>' +
+      '<p class="leaf-reason">选择规则：' + escapeHtml(cert.selectionRule) + '</p>' +
+      '</details>' +
+      `<p class="inv-fingerprint">冻结快照指纹：<code>${c.snapshot.fingerprint}</code>` +
+      '（库所顺序、初始标识、迁移向量与危险下限的规范化散列；编辑草稿即变化）</p>';
+  }
+
+  function renderInvariantUnavailable(panel, c) {
+    panel.innerHTML =
+      '<div class="invariant-none">' +
+      '<strong>∄ 线性位置不变量证书：仅此一种独立解释不可构造。</strong>' +
+      '</div>' +
+      `<p class="leaf-reason">${escapeHtml(c.noCertificateReason)}</p>` +
+      '<p class="leaf-reason">关联矩阵（迁移 × 库所，列 = produce − consume）秩为 ' +
+      `<code>${c.matrixRank}</code>，非负 P-不变量锥极射线 <strong>${c.rayCount}</strong> 条，` +
+      `其中严格分离 <strong>${c.separatingCount}</strong> 条。</p>` +
+      '<p class="invariant-keep"><strong>Karp–Miller 覆盖树的“不可覆盖”结论维持不变，不得改写</strong>；' +
+      '只是无法再用一条非负线性守恒式单独说明危险下限为何不可能同时达到。</p>' +
+      `<p class="inv-fingerprint">冻结快照指纹：<code>${c.snapshot.fingerprint}</code></p>`;
   }
 
   function renderClosedTreeSummary(r) {
@@ -466,6 +617,9 @@
     els.errorPanel.hidden = true;
     els.errorPanel.innerHTML = '';
     clearFieldMarks();
+    // 草稿已变更 / 清空 / 载入示例 / 重新审计：冻结快照作废，
+    // 旧证书立即失效且不会附着到新结论。
+    lastAudit = null;
   }
 
   function clearAll() {
@@ -588,4 +742,5 @@
   els.btnClear.addEventListener('click', clearAll);
   els.btnLoadCoverable.addEventListener('click', () => loadExample(coverableNet));
   els.btnLoadSafe.addEventListener('click', () => loadExample(boundedSafeNet));
+  els.btnLoadDraining.addEventListener('click', () => loadExample(drainingSafeNet));
 })();

@@ -253,6 +253,71 @@ button.danger:hover { background: var(--danger-bg); }
 
 tr.witness-row td { background: var(--witness); }
 
+/* ============ 位置不变量证书 ============ */
+.invariant-block {
+  border: 1px dashed var(--primary);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+#btn-request-invariant {
+  font-weight: 600;
+  border-color: var(--primary);
+  color: var(--primary);
+}
+#btn-request-invariant:hover { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+
+.invariant-ok {
+  border: 1px solid var(--safe);
+  background: var(--safe-bg);
+  color: var(--safe);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.invariant-none {
+  border: 1px solid var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+.invariant-stale {
+  border: 1px solid var(--danger);
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+}
+.invariant-keep { margin-top: 6px; }
+
+.inv-formula {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13.5px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.inv-table td, .inv-table th { font-size: 12.5px; }
+.inv-table tr.inv-ok td { color: var(--safe); }
+.inv-table tr.inv-bad td { color: var(--danger); font-weight: 700; }
+
+.ray-tag {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.ray-tag.sep { background: var(--safe-bg); color: var(--safe); }
+.ray-tag.eq { background: color-mix(in srgb, var(--muted) 15%, transparent); color: var(--muted); }
+tr.ray-chosen td { background: var(--witness); font-weight: 700; }
+
+.inv-fingerprint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.inv-fingerprint code { font-size: 11.5px; }
+
 details { margin-top: 10px; }
 summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
 

@@ -6,8 +6,9 @@
   'use strict';
 /*
  * 内置审计示例：
- *  - coverableNet   可覆盖网（无界转运：源池自补，舱内桶可无限累积 → 危险下限可被 ω 覆盖）
- *  - boundedSafeNet 不可覆盖网（有界互斥转运，许可库所永远为 0）
+ *  - coverableNet    可覆盖网（无界转运：源池自补，舱内桶可无限累积 → 危险下限可被 ω 覆盖）
+ *  - boundedSafeNet  不可覆盖网（有界互斥转运，许可库所永远为 0；存在严格分离的非负 P-不变量）
+ *  - drainingSafeNet 不可覆盖网（无源泄放，令牌单向销毁；无非负 P-不变量，证书须报"不可构造"）
  *
  * 向量维度顺序与 places 一致。
  */
@@ -52,5 +53,28 @@ const boundedSafeNet = {
   thresholds: [0, 0, 1], // 危险下限：许可 ≥ 1——任何可达标记都不满足
 };
 
-return { coverableNet, boundedSafeNet };
+// 库所：联锁阀、排出阱
+const drainingSafeNet = {
+  name: '无源泄放网（不可覆盖且无位置不变量）',
+  places: ['联锁阀', '排出阱'],
+  initial: [1, 0],
+  transitions: [
+    {
+      id: 't_release', // 阀位令牌泄入排出阱
+      consume: [1, 0],
+      produce: [0, 1],
+    },
+    {
+      id: 't_dump', // 排出阱令牌永久销毁（无产生）——总令牌数不守恒
+      consume: [0, 1],
+      produce: [0, 0],
+    },
+  ],
+  // 危险下限：联锁阀 ≥ 2。令牌只会单向流失，不可覆盖；
+  // 且关联矩阵无非平凡非负 P-不变量，位置不变量证书应明确"不可构造"，
+  // 而 Karp–Miller 的不可覆盖结论维持不变。
+  thresholds: [2, 0],
+};
+
+return { coverableNet, boundedSafeNet, drainingSafeNet };
 });

@@ -6,8 +6,8 @@
 # 任一阶段失败立即以非 0 退出码报告。
 set -eu
 
-echo "================ [1/3] 算法测试（Karp–Miller 引擎） ================"
-node --test test/omega.test.js test/model.test.js test/engine.test.js
+echo "================ [1/3] 算法测试（Karp–Miller 引擎 / 位置不变量证书） ================"
+node --test test/omega.test.js test/model.test.js test/engine.test.js test/invariant.test.js test/app-ui.test.js
 
 echo "================ [2/3] 前端构建检查 ================"
 node scripts/build-check.mjs
